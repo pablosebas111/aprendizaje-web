@@ -1,21 +1,18 @@
-import Image from "next/image";
-
 export default function Home() {
   return (
-    <main className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-10">
-
-      <h1 className="text-6xl font-bold mb-6">
+    <main className="flex flex-1 flex-col items-center justify-center px-6 py-16">
+      <h1 className="mb-4 text-center text-4xl font-semibold tracking-tight md:text-6xl">
         Mi Startup IA 🚀
       </h1>
-
-      <p className="text-xl text-gray-400 mb-8">
+      <p className="mb-10 max-w-lg text-center text-lg text-[color:color-mix(in_oklab,var(--foreground)_55%,transparent)]">
         Construyendo aplicaciones con agentes IA
       </p>
-
-      <button className="bg-white text-black px-6 py-3 rounded-xl text-lg font-semibold hover:scale-105 transition">
+      <button
+        type="button"
+        className="surface-panel rounded-xl px-8 py-3 text-base font-semibold transition hover:opacity-90"
+      >
         Empezar
       </button>
-
     </main>
   );
 }
