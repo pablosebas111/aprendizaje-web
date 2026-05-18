@@ -17,6 +17,7 @@ const LOG = "[CSV-KB]";
 type Mode = "historico" | "clasificar";
 
 type ClassifiedRow = FixedCsvRow & {
+  filled_tipo_movimiento: string | null;
   filled_concepto_1: string | null;
   filled_concepto_2: string | null;
   filled_concepto_3: string | null;
@@ -120,11 +121,20 @@ export function ImportCsvClient() {
       upserts.push({
         normalizedKey: nk,
         entry: {
+          tipo_movimiento: row.tipo_movimiento,
           concepto_1: row.concepto_1,
           concepto_2: row.concepto_2,
           concepto_3: row.concepto_3,
           originalMovimiento: row.movimiento,
         },
+      });
+
+      console.log(LOG, "historico: fila", row.dataLineNumber, "payload KB=", {
+        normalizedKey: nk,
+        tipo_movimiento: row.tipo_movimiento || null,
+        concepto_1: row.concepto_1 || null,
+        concepto_2: row.concepto_2 || null,
+        concepto_3: row.concepto_3 || null,
       });
     }
 
@@ -197,11 +207,16 @@ export function ImportCsvClient() {
         matched: m.matched,
         matchKind: m.matchKind,
         score: m.score,
+        tipo_movimiento_rellenado: m.matched ? m.tipo_movimiento : null,
+        concepto_1_rellenado: m.matched ? m.concepto_1 : null,
+        concepto_2_rellenado: m.matched ? m.concepto_2 : null,
+        concepto_3_rellenado: m.matched ? m.concepto_3 : null,
         noMatchReason: m.noMatchReason,
       });
 
       out.push({
         ...row,
+        filled_tipo_movimiento: m.matched ? m.tipo_movimiento : null,
         filled_concepto_1: m.matched ? m.concepto_1 : null,
         filled_concepto_2: m.matched ? m.concepto_2 : null,
         filled_concepto_3: m.matched ? m.concepto_3 : null,
@@ -269,6 +284,7 @@ export function ImportCsvClient() {
         <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Importar CSV</h1>
         <p className="max-w-2xl text-sm leading-relaxed text-[color:color-mix(in_oklab,var(--foreground)_55%,transparent)]">
           Mapping fijo de columnas: <span className="font-mono text-[13px]">MOVIMIENTO</span>,{" "}
+          <span className="font-mono text-[13px]">TIPO MOVIMIENTO</span>,{" "}
           <span className="font-mono text-[13px]">CONCEPTO 1</span>,{" "}
           <span className="font-mono text-[13px]">CONCEPTO 2</span>,{" "}
           <span className="font-mono text-[13px]">CONCEPTO 3</span>. Sin autodetección de
@@ -372,6 +388,7 @@ export function ImportCsvClient() {
               <tr className="border-b border-[color:color-mix(in_oklab,var(--foreground)_12%,transparent)] text-[color:color-mix(in_oklab,var(--foreground)_55%,transparent)]">
                 <th className="py-2 pr-3 font-medium">#</th>
                 <th className="py-2 pr-3 font-medium">MOVIMIENTO</th>
+                <th className="py-2 pr-3 font-medium">TIPO</th>
                 <th className="py-2 pr-3 font-medium">C1</th>
                 <th className="py-2 pr-3 font-medium">C2</th>
                 <th className="py-2 font-medium">C3</th>
@@ -389,6 +406,7 @@ export function ImportCsvClient() {
                   <td className="max-w-[220px] truncate py-2 pr-3 font-mono text-[12px] md:max-w-md">
                     {r.movimiento}
                   </td>
+                  <td className="py-2 pr-3">{r.tipo_movimiento || "—"}</td>
                   <td className="py-2 pr-3">{r.concepto_1 || "—"}</td>
                   <td className="py-2 pr-3">{r.concepto_2 || "—"}</td>
                   <td className="py-2">{r.concepto_3 || "—"}</td>
@@ -409,6 +427,7 @@ export function ImportCsvClient() {
                 <th className="py-2 pr-2 font-medium">MOVIMIENTO</th>
                 <th className="py-2 pr-2 font-medium">Match</th>
                 <th className="py-2 pr-2 font-medium">Score</th>
+                <th className="py-2 pr-2 font-medium">TIPO</th>
                 <th className="py-2 pr-2 font-medium">C1</th>
                 <th className="py-2 pr-2 font-medium">C2</th>
                 <th className="py-2 font-medium">C3</th>
@@ -428,6 +447,7 @@ export function ImportCsvClient() {
                   <td className="py-2 pr-2 font-mono text-[12px]">
                     {r.score != null ? r.score.toFixed(3) : "—"}
                   </td>
+                  <td className="py-2 pr-2">{r.filled_tipo_movimiento ?? "—"}</td>
                   <td className="py-2 pr-2">{r.filled_concepto_1 ?? "—"}</td>
                   <td className="py-2 pr-2">{r.filled_concepto_2 ?? "—"}</td>
                   <td className="py-2">{r.filled_concepto_3 ?? "—"}</td>
@@ -436,8 +456,8 @@ export function ImportCsvClient() {
             </tbody>
           </table>
           <p className="mt-3 text-xs text-[color:color-mix(in_oklab,var(--foreground)_50%,transparent)]">
-            Si no hay match, conceptos quedan vacíos (null en datos; aquí se muestran como —). Motivo
-            exacto en consola por fila.
+            Si no hay match, tipo de movimiento y conceptos quedan vacíos (null en datos; aquí se
+            muestran como —). Motivo exacto en consola por fila.
           </p>
         </section>
       ) : null}

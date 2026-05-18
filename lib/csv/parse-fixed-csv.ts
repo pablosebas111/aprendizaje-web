@@ -4,6 +4,7 @@ import {
   CSV_COLUMN_CONCEPTO_2,
   CSV_COLUMN_CONCEPTO_3,
   CSV_COLUMN_MOVIMIENTO,
+  CSV_COLUMN_TIPO_MOVIMIENTO,
   REQUIRED_CSV_HEADERS,
 } from "./constants";
 
@@ -11,6 +12,7 @@ const LOG = "[CSV-KB]";
 
 export type FixedCsvRow = {
   movimiento: string;
+  tipo_movimiento: string;
   concepto_1: string;
   concepto_2: string;
   concepto_3: string;
@@ -73,6 +75,7 @@ function resolveHeaderKeys(metaFields: string[]): { ok: true; resolved: Resolved
     ok: true,
     resolved: {
       MOVIMIENTO: resolved.MOVIMIENTO!,
+      "TIPO MOVIMIENTO": resolved["TIPO MOVIMIENTO"]!,
       "CONCEPTO 1": resolved["CONCEPTO 1"]!,
       "CONCEPTO 2": resolved["CONCEPTO 2"]!,
       "CONCEPTO 3": resolved["CONCEPTO 3"]!,
@@ -120,12 +123,14 @@ export function parseFixedMappingCsv(text: string): ParseFixedCsvResult {
     nonEmptyRawRows += 1;
 
     const movimiento = String(obj[hk[CSV_COLUMN_MOVIMIENTO]] ?? "").trim();
+    const tipo_movimiento = String(obj[hk[CSV_COLUMN_TIPO_MOVIMIENTO]] ?? "").trim();
     const concepto_1 = String(obj[hk[CSV_COLUMN_CONCEPTO_1]] ?? "").trim();
     const concepto_2 = String(obj[hk[CSV_COLUMN_CONCEPTO_2]] ?? "").trim();
     const concepto_3 = String(obj[hk[CSV_COLUMN_CONCEPTO_3]] ?? "").trim();
 
     rows.push({
       movimiento,
+      tipo_movimiento,
       concepto_1,
       concepto_2,
       concepto_3,

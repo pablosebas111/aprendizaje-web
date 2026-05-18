@@ -1,4 +1,5 @@
 export type KBEntry = {
+  tipo_movimiento: string;
   concepto_1: string;
   concepto_2: string;
   concepto_3: string;
@@ -16,6 +17,7 @@ export type MatchKind = "exact" | "partial" | "similarity";
 
 export type MovementMatchResult = {
   matched: boolean;
+  tipo_movimiento: string | null;
   concepto_1: string | null;
   concepto_2: string | null;
   concepto_3: string | null;

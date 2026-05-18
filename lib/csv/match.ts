@@ -17,6 +17,7 @@ function entryToResult(
 ): MovementMatchResult {
   return {
     matched: true,
+    tipo_movimiento: e.tipo_movimiento || null,
     concepto_1: e.concepto_1 || null,
     concepto_2: e.concepto_2 || null,
     concepto_3: e.concepto_3 || null,
@@ -50,6 +51,7 @@ export function matchMovementAgainstKb(
     console.log(LOG, reason);
     return {
       matched: false,
+      tipo_movimiento: null,
       concepto_1: null,
       concepto_2: null,
       concepto_3: null,
@@ -66,6 +68,7 @@ export function matchMovementAgainstKb(
     console.log(LOG, reason);
     return {
       matched: false,
+      tipo_movimiento: null,
       concepto_1: null,
       concepto_2: null,
       concepto_3: null,
@@ -78,7 +81,14 @@ export function matchMovementAgainstKb(
 
   const exact = kb.byNormalizedKey[norm];
   if (exact) {
-    console.log(LOG, "MATCH exact:", { normalizedKey: norm, score: 1 });
+    console.log(LOG, "MATCH exact:", {
+      normalizedKey: norm,
+      score: 1,
+      tipo_movimiento: exact.tipo_movimiento || null,
+      concepto_1: exact.concepto_1 || null,
+      concepto_2: exact.concepto_2 || null,
+      concepto_3: exact.concepto_3 || null,
+    });
     return entryToResult(exact, "exact", 1, norm);
   }
 
@@ -107,6 +117,10 @@ export function matchMovementAgainstKb(
       normalizedKey: best.key,
       containmentRatio: Number(best.containmentRatio.toFixed(4)),
       candidatosParciales: partials.length,
+      tipo_movimiento: entry.tipo_movimiento || null,
+      concepto_1: entry.concepto_1 || null,
+      concepto_2: entry.concepto_2 || null,
+      concepto_3: entry.concepto_3 || null,
     });
     return entryToResult(entry, "partial", best.containmentRatio, best.key);
   }
@@ -127,6 +141,10 @@ export function matchMovementAgainstKb(
       normalizedKey: bestKey,
       similarityScore: Number(bestScore.toFixed(4)),
       umbral: SIMILARITY_THRESHOLD,
+      tipo_movimiento: entry.tipo_movimiento || null,
+      concepto_1: entry.concepto_1 || null,
+      concepto_2: entry.concepto_2 || null,
+      concepto_3: entry.concepto_3 || null,
     });
     return entryToResult(entry, "similarity", bestScore, bestKey);
   }
@@ -135,6 +153,7 @@ export function matchMovementAgainstKb(
   console.log(LOG, reason);
   return {
     matched: false,
+    tipo_movimiento: null,
     concepto_1: null,
     concepto_2: null,
     concepto_3: null,
