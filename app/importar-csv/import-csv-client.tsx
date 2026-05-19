@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { normalizeMovement } from "@/lib/csv/normalize";
-import { matchMovementAgainstKb } from "@/lib/csv/match";
 import { parseFixedMappingCsv } from "@/lib/csv/parse-fixed-csv";
+import { parseBankCsv } from "@/lib/csv/parse-bank-csv";
+import { classifyBankCsvRows } from "@/lib/csv/classify-bank-csv";
+import { exportClassifiedBankCsv } from "@/lib/csv/export-bank-csv";
 import {
   loadKnowledgeBase,
   saveKnowledgeBase,
@@ -12,20 +14,16 @@ import {
 } from "@/lib/csv/kb-storage";
 import type { KBEntry, MovementKnowledgeBase } from "@/lib/csv/kb-types";
 import type { FixedCsvRow } from "@/lib/csv/parse-fixed-csv";
+import type { ClassifiedBankCsvRow } from "@/lib/csv/classify-bank-csv";
 
 const LOG = "[CSV-KB]";
 
 type Mode = "historico" | "clasificar";
 
-type ClassifiedRow = FixedCsvRow & {
-  filled_tipo_movimiento: string | null;
-  filled_concepto_1: string | null;
-  filled_concepto_2: string | null;
-  filled_concepto_3: string | null;
-  matchKind: string | null;
-  score: number | null;
-  noMatchReason: string | null;
-};
+function emptyDisplay(value: string | number | null | undefined): string {
+  if (value == null || value === "") return "—";
+  return String(value);
+}
 
 export function ImportCsvClient() {
   const [mode, setMode] = useState<Mode>("historico");
@@ -35,7 +33,7 @@ export function ImportCsvClient() {
   const [status, setStatus] = useState<string | null>(null);
   const [lastStats, setLastStats] = useState<Record<string, string | number> | null>(null);
   const [previewHistorico, setPreviewHistorico] = useState<FixedCsvRow[]>([]);
-  const [previewClasificar, setPreviewClasificar] = useState<ClassifiedRow[]>([]);
+  const [classifiedBankRows, setClassifiedBankRows] = useState<ClassifiedBankCsvRow[]>([]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -43,7 +41,7 @@ export function ImportCsvClient() {
       setKb(k);
       console.log(
         LOG,
-        "KB cargada al montar. Registros en memoria histórica:",
+        "KB cargada al montar. Registros en memoria historica:",
         Object.keys(k.byNormalizedKey).length,
       );
     });
@@ -80,8 +78,8 @@ export function ImportCsvClient() {
       try {
         const parsed = validateKnowledgeBase(JSON.parse(String(reader.result ?? "")));
         if (!parsed) {
-          setStatus("El archivo JSON no tiene formato de KB válido.");
-          console.warn(LOG, "Importación de KB rechazada: formato inválido.");
+          setStatus("El archivo JSON no tiene formato de KB valido.");
+          console.warn(LOG, "Importacion de KB rechazada: formato invalido.");
           return;
         }
 
@@ -90,7 +88,7 @@ export function ImportCsvClient() {
         setLastStats({
           registros_importados_kb: Object.keys(parsed.byNormalizedKey).length,
         });
-        setStatus("KB importada correctamente. Se reemplazó la memoria local.");
+        setStatus("KB importada correctamente. Se reemplazo la memoria local.");
         console.log(LOG, "KB importada desde JSON:", {
           registros: Object.keys(parsed.byNormalizedKey).length,
         });
@@ -106,29 +104,45 @@ export function ImportCsvClient() {
     reader.readAsText(file, "UTF-8");
   };
 
-  const readFile = (file: File) => {
-    setFileName(file.name);
+  const resetImportState = () => {
     setStatus(null);
     setLastStats(null);
     setPreviewHistorico([]);
-    setPreviewClasificar([]);
+    setClassifiedBankRows([]);
+  };
+
+  const readFile = (file: File) => {
+    setFileName(file.name);
+    resetImportState();
+
     const reader = new FileReader();
     reader.onload = () => {
       const text = String(reader.result ?? "");
-      const parsed = parseFixedMappingCsv(text);
-      if (!parsed.ok) {
-        setStatus(parsed.message);
-        console.log(LOG, "Importación detenida:", parsed.message);
-        return;
-      }
-
       const currentKb = refreshKb();
 
       if (mode === "historico") {
+        const parsed = parseFixedMappingCsv(text);
+        if (!parsed.ok) {
+          setStatus(parsed.message);
+          console.log(LOG, "Importacion historica detenida:", parsed.message);
+          return;
+        }
         processHistorico(parsed.rows, currentKb);
-      } else {
-        processClasificar(parsed.rows, currentKb);
+        return;
       }
+
+      const parsed = parseBankCsv(text);
+      if (!parsed.ok) {
+        setStatus(parsed.message);
+        console.log(LOG, "Clasificacion bancaria detenida:", parsed.message);
+        return;
+      }
+      processClasificarBanco(
+        parsed.rows,
+        currentKb,
+        parsed.totalDataRows,
+        parsed.skippedInvalidRows,
+      );
     };
     reader.onerror = () => {
       setStatus("No se pudo leer el archivo.");
@@ -145,24 +159,29 @@ export function ImportCsvClient() {
 
     let skippedEmptyMovimiento = 0;
     const skipSamples: string[] = [];
-
     const upserts: Array<{ normalizedKey: string; entry: KBEntry }> = [];
 
     for (const row of rows) {
       if (!row.movimiento.trim()) {
         skippedEmptyMovimiento += 1;
-        const msg = `Fila ${row.dataLineNumber}: MOVIMIENTO vacío → descartada (no silenciosa).`;
+        const msg = `Fila ${row.dataLineNumber}: MOVIMIENTO vacio -> descartada.`;
         if (skipSamples.length < 8) skipSamples.push(msg);
         console.warn(LOG, msg);
         continue;
       }
 
       const nk = normalizeMovement(row.movimiento);
-      console.log(LOG, "histórico: fila", row.dataLineNumber, "movimiento normalizado=", JSON.stringify(nk));
+      console.log(
+        LOG,
+        "historico: fila",
+        row.dataLineNumber,
+        "movimiento normalizado=",
+        JSON.stringify(nk),
+      );
 
       if (!nk) {
         skippedEmptyMovimiento += 1;
-        const msg = `Fila ${row.dataLineNumber}: MOVIMIENTO sin caracteres alfanuméricos tras normalizar → descartada.`;
+        const msg = `Fila ${row.dataLineNumber}: MOVIMIENTO sin clave normalizada -> descartada.`;
         if (skipSamples.length < 8) skipSamples.push(msg);
         console.warn(LOG, msg);
         continue;
@@ -196,7 +215,7 @@ export function ImportCsvClient() {
     const rowsTotal = rows.length;
     const rowsUsed = upserts.length;
 
-    console.log(LOG, "Resumen histórico:", {
+    console.log(LOG, "Resumen historico:", {
       filasEnCsv: rowsTotal,
       filasAceptadasParaKb: rowsUsed,
       filasDescartadasMovimientoVacio: skippedEmptyMovimiento,
@@ -218,8 +237,8 @@ export function ImportCsvClient() {
     });
     setStatus(
       skippedEmptyMovimiento > 0
-        ? `Importación histórica completada con ${skippedEmptyMovimiento} fila(s) descartadas (ver consola).`
-        : "Importación histórica completada.",
+        ? `Importacion historica completada con ${skippedEmptyMovimiento} fila(s) descartadas.`
+        : "Importacion historica completada.",
     );
 
     if (skipSamples.length) {
@@ -227,79 +246,45 @@ export function ImportCsvClient() {
     }
   };
 
-  const processClasificar = (rows: FixedCsvRow[], baseKb: MovementKnowledgeBase) => {
-    let skippedEmptyMovimiento = 0;
-    let skippedSinClaveTrasNormalizar = 0;
-    const out: ClassifiedRow[] = [];
+  const processClasificarBanco = (
+    rows: Parameters<typeof classifyBankCsvRows>[0],
+    baseKb: MovementKnowledgeBase,
+    totalDataRows: number,
+    skippedInvalidRows: number,
+  ) => {
+    const result = classifyBankCsvRows(rows, baseKb, totalDataRows);
+    setClassifiedBankRows(result.rows);
+    setLastStats({
+      ...result.stats,
+      filas_invalidas_ignoradas: skippedInvalidRows,
+    });
+    setStatus(
+      `Clasificacion completada: ${result.stats.movimientos_clasificados} de ${result.stats.movimientos_validos_procesados} movimiento(s) clasificado(s).`,
+    );
+  };
 
-    for (const row of rows) {
-      if (!row.movimiento.trim()) {
-        skippedEmptyMovimiento += 1;
-        console.warn(
-          LOG,
-          `Fila ${row.dataLineNumber}: MOVIMIENTO vacío → sin clasificación.`,
-        );
-        continue;
-      }
-
-      const nk = normalizeMovement(row.movimiento);
-      if (!nk) {
-        skippedSinClaveTrasNormalizar += 1;
-        console.warn(
-          LOG,
-          `Fila ${row.dataLineNumber}: MOVIMIENTO sin clave normalizada (solo símbolos) → descartada.`,
-        );
-        continue;
-      }
-
-      const m = matchMovementAgainstKb(row.movimiento, baseKb);
-      console.log(LOG, "clasificar: fila", row.dataLineNumber, {
-        matched: m.matched,
-        matchKind: m.matchKind,
-        score: m.score,
-        tipo_movimiento_rellenado: m.matched ? m.tipo_movimiento : null,
-        concepto_1_rellenado: m.matched ? m.concepto_1 : null,
-        concepto_2_rellenado: m.matched ? m.concepto_2 : null,
-        concepto_3_rellenado: m.matched ? m.concepto_3 : null,
-        noMatchReason: m.noMatchReason,
-      });
-
-      out.push({
-        ...row,
-        filled_tipo_movimiento: m.matched ? m.tipo_movimiento : null,
-        filled_concepto_1: m.matched ? m.concepto_1 : null,
-        filled_concepto_2: m.matched ? m.concepto_2 : null,
-        filled_concepto_3: m.matched ? m.concepto_3 : null,
-        matchKind: m.matchKind,
-        score: m.score,
-        noMatchReason: m.noMatchReason,
-      });
+  const downloadClassifiedCsv = () => {
+    if (classifiedBankRows.length === 0) {
+      setStatus("No hay movimientos clasificados para descargar.");
+      return;
     }
 
-    const matched = out.filter((r) => r.matchKind !== null).length;
-    const unmatched = out.length - matched;
-
-    console.log(LOG, "Resumen clasificación:", {
-      filasEnCsv: rows.length,
-      filasClasificables: out.length,
-      descartadas_movimiento_vacio: skippedEmptyMovimiento,
-      descartadas_sin_clave_normalizada: skippedSinClaveTrasNormalizar,
-      matches: matched,
-      sin_match: unmatched,
-      kb_size: Object.keys(baseKb.byNormalizedKey).length,
+    const csv = exportClassifiedBankCsv(classifiedBankRows);
+    const blob = new Blob([`\uFEFF${csv}`], {
+      type: "text/csv;charset=utf-8",
     });
-
-    setPreviewClasificar(out.slice(0, 40));
-    setLastStats({
-      filas_en_csv: rows.length,
-      filas_clasificadas: out.length,
-      descartadas_movimiento_vacio: skippedEmptyMovimiento,
-      descartadas_sin_clave_norm: skippedSinClaveTrasNormalizar,
-      con_match: matched,
-      sin_match: unmatched,
-      kb_consultada: Object.keys(baseKb.byNormalizedKey).length,
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const sourceName = fileName?.replace(/\.csv$/i, "") || "movimientos";
+    a.href = url;
+    a.download = `${sourceName}-clasificado.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setStatus(`CSV clasificado descargado con ${classifiedBankRows.length} movimiento(s).`);
+    console.log(LOG, "CSV clasificado descargado:", {
+      filas: classifiedBankRows.length,
+      archivo: a.download,
     });
-    setStatus("Clasificación completada (solo lectura de KB; no se modifica el histórico).");
   };
 
   const onDrop = (e: React.DragEvent) => {
@@ -323,29 +308,35 @@ export function ImportCsvClient() {
   const modeLabel = useMemo(
     () =>
       mode === "historico"
-        ? "Construir / ampliar memoria histórica"
-        : "Clasificar nuevos movimientos contra el histórico",
+        ? "Construir / ampliar memoria historica"
+        : "Clasificar CSV bancario usando CONCEPTO como movimiento",
     [mode],
   );
+
+  const uploadHint =
+    mode === "historico"
+      ? "CSV historico con MOVIMIENTO, TIPO MOVIMIENTO y CONCEPTO 1/2/3"
+      : "CSV bancario con CONCEPTO, FECHA VALOR, IMPORTE EUR y SALDO";
 
   return (
     <div className="flex flex-1 flex-col gap-6 p-6 md:p-10">
       <header className="max-w-5xl space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Importar CSV</h1>
-        <p className="max-w-2xl text-sm leading-relaxed text-[color:color-mix(in_oklab,var(--foreground)_55%,transparent)]">
-          Mapping fijo de columnas: <span className="font-mono text-[13px]">MOVIMIENTO</span>,{" "}
-          <span className="font-mono text-[13px]">TIPO MOVIMIENTO</span>,{" "}
-          <span className="font-mono text-[13px]">CONCEPTO 1</span>,{" "}
-          <span className="font-mono text-[13px]">CONCEPTO 2</span>,{" "}
-          <span className="font-mono text-[13px]">CONCEPTO 3</span>. Sin autodetección de
-          columnas. Trazas detalladas en la consola del navegador ({LOG}).
+        <p className="max-w-3xl text-sm leading-relaxed text-[color:color-mix(in_oklab,var(--foreground)_55%,transparent)]">
+          El historico aprende desde <span className="font-mono text-[13px]">MOVIMIENTO</span>.
+          Los nuevos movimientos bancarios se clasifican usando{" "}
+          <span className="font-mono text-[13px]">CONCEPTO</span> como texto de matching contra
+          la KB. Trazas detalladas en la consola del navegador ({LOG}).
         </p>
       </header>
 
       <div className="flex max-w-5xl flex-wrap gap-2">
         <button
           type="button"
-          onClick={() => setMode("historico")}
+          onClick={() => {
+            setMode("historico");
+            resetImportState();
+          }}
           className={[
             "rounded-full px-4 py-2 text-sm font-medium transition-colors",
             mode === "historico"
@@ -353,11 +344,14 @@ export function ImportCsvClient() {
               : "text-[color:color-mix(in_oklab,var(--foreground)_65%,transparent)] hover:surface-subtle",
           ].join(" ")}
         >
-          Histórico → KB
+          Historico {"->"} KB
         </button>
         <button
           type="button"
-          onClick={() => setMode("clasificar")}
+          onClick={() => {
+            setMode("clasificar");
+            resetImportState();
+          }}
           className={[
             "rounded-full px-4 py-2 text-sm font-medium transition-colors",
             mode === "clasificar"
@@ -375,9 +369,9 @@ export function ImportCsvClient() {
       <section className="surface-panel max-w-5xl rounded-2xl p-6 md:p-8">
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm font-medium">Memoria histórica persistente</p>
+            <p className="text-sm font-medium">Memoria historica persistente</p>
             <p className="text-xs text-[color:color-mix(in_oklab,var(--foreground)_55%,transparent)]">
-              Registros únicos indexados por MOVIMIENTO normalizado (localStorage).
+              Registros unicos indexados por MOVIMIENTO normalizado (localStorage).
             </p>
           </div>
           <p className="text-2xl font-semibold tabular-nums">{kbCount}</p>
@@ -422,9 +416,9 @@ export function ImportCsvClient() {
           ].join(" ")}
         >
           <input type="file" accept=".csv,text/csv" className="hidden" onChange={onPick} />
-          <span className="text-sm font-medium">Arrastra un CSV aquí o haz clic para elegir</span>
+          <span className="text-sm font-medium">Arrastra un CSV aqui o haz clic para elegir</span>
           <span className="text-xs text-[color:color-mix(in_oklab,var(--foreground)_50%,transparent)]">
-            UTF-8 recomendado · cabecera obligatoria con nombres fijos
+            {uploadHint}
           </span>
         </label>
 
@@ -451,6 +445,16 @@ export function ImportCsvClient() {
               </div>
             ))}
           </dl>
+        ) : null}
+
+        {classifiedBankRows.length > 0 ? (
+          <button
+            type="button"
+            onClick={downloadClassifiedCsv}
+            className="mt-6 rounded-lg bg-[var(--foreground)] px-4 py-2 text-sm font-semibold text-[var(--background)] transition hover:opacity-85"
+          >
+            Descargar CSV clasificado
+          </button>
         ) : null}
       </section>
 
@@ -480,10 +484,10 @@ export function ImportCsvClient() {
                   <td className="max-w-[220px] truncate py-2 pr-3 font-mono text-[12px] md:max-w-md">
                     {r.movimiento}
                   </td>
-                  <td className="py-2 pr-3">{r.tipo_movimiento || "—"}</td>
-                  <td className="py-2 pr-3">{r.concepto_1 || "—"}</td>
-                  <td className="py-2 pr-3">{r.concepto_2 || "—"}</td>
-                  <td className="py-2">{r.concepto_3 || "—"}</td>
+                  <td className="py-2 pr-3">{emptyDisplay(r.tipo_movimiento)}</td>
+                  <td className="py-2 pr-3">{emptyDisplay(r.concepto_1)}</td>
+                  <td className="py-2 pr-3">{emptyDisplay(r.concepto_2)}</td>
+                  <td className="py-2">{emptyDisplay(r.concepto_3)}</td>
                 </tr>
               ))}
             </tbody>
@@ -491,48 +495,46 @@ export function ImportCsvClient() {
         </section>
       ) : null}
 
-      {mode === "clasificar" && previewClasificar.length > 0 ? (
+      {mode === "clasificar" && classifiedBankRows.length > 0 ? (
         <section className="surface-panel max-w-5xl overflow-x-auto rounded-2xl p-4 md:p-6">
           <h2 className="mb-3 text-sm font-semibold">Resultado (muestra)</h2>
           <table className="min-w-full border-collapse text-left text-xs md:text-sm">
             <thead>
               <tr className="border-b border-[color:color-mix(in_oklab,var(--foreground)_12%,transparent)] text-[color:color-mix(in_oklab,var(--foreground)_55%,transparent)]">
-                <th className="py-2 pr-2 font-medium">#</th>
-                <th className="py-2 pr-2 font-medium">MOVIMIENTO</th>
-                <th className="py-2 pr-2 font-medium">Match</th>
-                <th className="py-2 pr-2 font-medium">Score</th>
-                <th className="py-2 pr-2 font-medium">TIPO</th>
-                <th className="py-2 pr-2 font-medium">C1</th>
-                <th className="py-2 pr-2 font-medium">C2</th>
-                <th className="py-2 font-medium">C3</th>
+                <th className="py-2 pr-3 font-medium">FECHA VALOR</th>
+                <th className="py-2 pr-3 font-medium">CONCEPTO</th>
+                <th className="py-2 pr-3 font-medium">IMPORTE EUR</th>
+                <th className="py-2 pr-3 font-medium">TIPO</th>
+                <th className="py-2 pr-3 font-medium">C1</th>
+                <th className="py-2 pr-3 font-medium">C2</th>
+                <th className="py-2 pr-3 font-medium">C3</th>
+                <th className="py-2 font-medium">ESTADO</th>
               </tr>
             </thead>
             <tbody>
-              {previewClasificar.map((r) => (
+              {classifiedBankRows.slice(0, 40).map((r) => (
                 <tr
-                  key={`${r.dataLineNumber}-${r.movimiento}`}
+                  key={`${r.dataLineNumber}-${r.concepto}`}
                   className="border-b border-[color:color-mix(in_oklab,var(--foreground)_8%,transparent)]"
                 >
-                  <td className="py-2 pr-2 font-mono text-[12px]">{r.dataLineNumber}</td>
-                  <td className="max-w-[180px] truncate py-2 pr-2 font-mono text-[12px] md:max-w-sm">
-                    {r.movimiento}
+                  <td className="py-2 pr-3 font-mono text-[12px]">
+                    {emptyDisplay(r.fecha_valor)}
                   </td>
-                  <td className="py-2 pr-2">{r.matchKind ?? "—"}</td>
-                  <td className="py-2 pr-2 font-mono text-[12px]">
-                    {r.score != null ? r.score.toFixed(3) : "—"}
+                  <td className="max-w-[240px] truncate py-2 pr-3 font-mono text-[12px] md:max-w-md">
+                    {r.concepto}
                   </td>
-                  <td className="py-2 pr-2">{r.filled_tipo_movimiento ?? "—"}</td>
-                  <td className="py-2 pr-2">{r.filled_concepto_1 ?? "—"}</td>
-                  <td className="py-2 pr-2">{r.filled_concepto_2 ?? "—"}</td>
-                  <td className="py-2">{r.filled_concepto_3 ?? "—"}</td>
+                  <td className="py-2 pr-3 font-mono text-[12px]">
+                    {emptyDisplay(r.importe)}
+                  </td>
+                  <td className="py-2 pr-3">{emptyDisplay(r.tipo_movimiento)}</td>
+                  <td className="py-2 pr-3">{emptyDisplay(r.concepto_1)}</td>
+                  <td className="py-2 pr-3">{emptyDisplay(r.concepto_2)}</td>
+                  <td className="py-2 pr-3">{emptyDisplay(r.concepto_3)}</td>
+                  <td className="py-2">{r.estado_clasificacion}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <p className="mt-3 text-xs text-[color:color-mix(in_oklab,var(--foreground)_50%,transparent)]">
-            Si no hay match, tipo de movimiento y conceptos quedan vacíos (null en datos; aquí se
-            muestran como —). Motivo exacto en consola por fila.
-          </p>
         </section>
       ) : null}
     </div>
