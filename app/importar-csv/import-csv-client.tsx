@@ -8,6 +8,7 @@ import {
   loadKnowledgeBase,
   saveKnowledgeBase,
   upsertKbEntries,
+  validateKnowledgeBase,
 } from "@/lib/csv/kb-storage";
 import type { KBEntry, MovementKnowledgeBase } from "@/lib/csv/kb-types";
 import type { FixedCsvRow } from "@/lib/csv/parse-fixed-csv";
@@ -55,6 +56,55 @@ export function ImportCsvClient() {
     setKb(k);
     return k;
   }, []);
+
+  const exportKb = () => {
+    const currentKb = refreshKb();
+    const count = Object.keys(currentKb.byNormalizedKey).length;
+    const blob = new Blob([JSON.stringify(currentKb, null, 2)], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `mi-app-ia-kb-${stamp}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setStatus(`KB exportada con ${count} registro(s).`);
+    console.log(LOG, "KB exportada a JSON:", { registros: count });
+  };
+
+  const importKbFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = validateKnowledgeBase(JSON.parse(String(reader.result ?? "")));
+        if (!parsed) {
+          setStatus("El archivo JSON no tiene formato de KB válido.");
+          console.warn(LOG, "Importación de KB rechazada: formato inválido.");
+          return;
+        }
+
+        saveKnowledgeBase(parsed);
+        setKb(parsed);
+        setLastStats({
+          registros_importados_kb: Object.keys(parsed.byNormalizedKey).length,
+        });
+        setStatus("KB importada correctamente. Se reemplazó la memoria local.");
+        console.log(LOG, "KB importada desde JSON:", {
+          registros: Object.keys(parsed.byNormalizedKey).length,
+        });
+      } catch (e) {
+        setStatus("No se pudo leer el JSON de KB.");
+        console.warn(LOG, "Error importando KB JSON:", e);
+      }
+    };
+    reader.onerror = () => {
+      setStatus("No se pudo leer el archivo de KB.");
+      console.error(LOG, "FileReader error importando KB");
+    };
+    reader.readAsText(file, "UTF-8");
+  };
 
   const readFile = (file: File) => {
     setFileName(file.name);
@@ -331,6 +381,30 @@ export function ImportCsvClient() {
             </p>
           </div>
           <p className="text-2xl font-semibold tabular-nums">{kbCount}</p>
+        </div>
+
+        <div className="mb-6 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={exportKb}
+            className="surface-subtle rounded-lg px-3 py-2 text-sm font-medium transition hover:opacity-85"
+          >
+            Exportar KB JSON
+          </button>
+          <label className="surface-subtle cursor-pointer rounded-lg px-3 py-2 text-sm font-medium transition hover:opacity-85">
+            Importar KB JSON
+            <input
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.currentTarget.value = "";
+                if (!f) return;
+                importKbFile(f);
+              }}
+            />
+          </label>
         </div>
 
         <label

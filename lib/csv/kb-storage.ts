@@ -7,13 +7,39 @@ function emptyKb(): MovementKnowledgeBase {
   return { version: 1, byNormalizedKey: {} };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function validateKnowledgeBase(value: unknown): MovementKnowledgeBase | null {
+  if (!isRecord(value) || value.version !== 1 || !isRecord(value.byNormalizedKey)) {
+    return null;
+  }
+
+  const byNormalizedKey: MovementKnowledgeBase["byNormalizedKey"] = {};
+
+  for (const [key, rawEntry] of Object.entries(value.byNormalizedKey)) {
+    if (!key.trim() || !isRecord(rawEntry)) return null;
+
+    byNormalizedKey[key] = {
+      tipo_movimiento: String(rawEntry.tipo_movimiento ?? ""),
+      concepto_1: String(rawEntry.concepto_1 ?? ""),
+      concepto_2: String(rawEntry.concepto_2 ?? ""),
+      concepto_3: String(rawEntry.concepto_3 ?? ""),
+      originalMovimiento: String(rawEntry.originalMovimiento ?? ""),
+    };
+  }
+
+  return { version: 1, byNormalizedKey };
+}
+
 export function loadKnowledgeBase(): MovementKnowledgeBase {
   if (typeof window === "undefined") return emptyKb();
   try {
     const raw = window.localStorage.getItem(KB_STORAGE_KEY);
     if (!raw) return emptyKb();
-    const parsed = JSON.parse(raw) as MovementKnowledgeBase;
-    if (parsed?.version !== 1 || typeof parsed.byNormalizedKey !== "object") {
+    const parsed = validateKnowledgeBase(JSON.parse(raw));
+    if (!parsed) {
       console.warn(LOG, "KB en localStorage con formato inesperado; se reinicia objeto vacío.");
       return emptyKb();
     }
