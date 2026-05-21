@@ -41,6 +41,7 @@ export function ImportCsvClient() {
   const [classifiedRows, setClassifiedRows] = useState<ClassifiedImportedCsvRow[]>([]);
   const [importedHeaders, setImportedHeaders] = useState<string[]>([]);
   const [movementColumn, setMovementColumn] = useState<string | null>(null);
+  const [amountColumn, setAmountColumn] = useState<string | null>(null);
   const [pendingImportedCsv, setPendingImportedCsv] = useState<ParseImportedCsvSuccess | null>(null);
 
   useEffect(() => {
@@ -119,6 +120,7 @@ export function ImportCsvClient() {
     setClassifiedRows([]);
     setImportedHeaders([]);
     setMovementColumn(null);
+    setAmountColumn(null);
     setPendingImportedCsv(null);
   };
 
@@ -276,27 +278,66 @@ export function ImportCsvClient() {
       baseKb,
       parsed.totalDataRows,
     );
-    const overview = buildClassifiedOverview({
-      rows: result.rows,
-      headers: parsed.headers,
-      sourceFileName: fileName,
-      movementColumn: selectedMovementColumn,
-    });
+    const overview = saveOverview(result.rows, parsed.headers, selectedMovementColumn);
 
-    saveClassifiedOverview(overview);
     setClassifiedRows(result.rows);
     setImportedHeaders(parsed.headers);
     setMovementColumn(selectedMovementColumn);
+    setAmountColumn(overview.amountColumn);
     setPendingImportedCsv(null);
     setLastStats({
       ...result.stats,
       columna_importe_overview: overview.amountColumn ?? "No detectada",
+      importes_validos: overview.diagnostics.validAmountRows,
+      importes_negativos_gastos: overview.diagnostics.negativeAmountRows,
+      importes_positivos_ingresos: overview.diagnostics.positiveAmountRows,
+      muestra_importes: overview.diagnostics.sampleRawValues.join(" | ") || "Sin muestra",
     });
     setStatus(
       `Clasificacion completada usando "${selectedMovementColumn}": ${result.stats.clasificados} de ${result.stats.filas_validas} fila(s) clasificada(s). ` +
         (overview.amountColumn
           ? `Overview guardado con importe detectado en "${overview.amountColumn}".`
           : "Overview guardado, pero no se detecto una columna de importe."),
+    );
+  };
+
+  const saveOverview = (
+    rows: ClassifiedImportedCsvRow[],
+    headers: string[],
+    selectedMovementColumn: string,
+    selectedAmountColumn?: string | null,
+  ) => {
+    const overview = buildClassifiedOverview({
+      rows,
+      headers,
+      sourceFileName: fileName,
+      movementColumn: selectedMovementColumn,
+      amountColumn: selectedAmountColumn,
+    });
+    saveClassifiedOverview(overview);
+    return overview;
+  };
+
+  const recalculateOverviewWithAmountColumn = (selectedAmountColumn: string) => {
+    if (!movementColumn || classifiedRows.length === 0) return;
+
+    const overview = saveOverview(
+      classifiedRows,
+      importedHeaders,
+      movementColumn,
+      selectedAmountColumn,
+    );
+    setAmountColumn(overview.amountColumn);
+    setLastStats((current) => ({
+      ...(current ?? {}),
+      columna_importe_overview: overview.amountColumn ?? "No detectada",
+      importes_validos: overview.diagnostics.validAmountRows,
+      importes_negativos_gastos: overview.diagnostics.negativeAmountRows,
+      importes_positivos_ingresos: overview.diagnostics.positiveAmountRows,
+      muestra_importes: overview.diagnostics.sampleRawValues.join(" | ") || "Sin muestra",
+    }));
+    setStatus(
+      `Overview recalculado usando "${selectedAmountColumn}" como columna de importe.`,
     );
   };
 
@@ -523,13 +564,42 @@ export function ImportCsvClient() {
         ) : null}
 
         {classifiedRows.length > 0 ? (
-          <button
-            type="button"
-            onClick={downloadClassifiedCsv}
-            className="mt-6 rounded-lg bg-[var(--foreground)] px-4 py-2 text-sm font-semibold text-[var(--background)] transition hover:opacity-85"
-          >
-            Descargar CSV clasificado
-          </button>
+          <div className="mt-6 flex flex-col gap-4">
+            <div className="rounded-lg border border-[color:color-mix(in_oklab,var(--foreground)_14%,transparent)] p-4">
+              <label className="block text-sm font-medium" htmlFor="amount-column">
+                Columna de importe para el overview
+              </label>
+              <p className="mt-1 text-xs text-[color:color-mix(in_oklab,var(--foreground)_55%,transparent)]">
+                Cambiala si el autodiagnostico no ha elegido la columna correcta. Negativos =
+                gastos; positivos = ingresos.
+              </p>
+              <select
+                id="amount-column"
+                value={amountColumn ?? ""}
+                onChange={(e) => {
+                  const selected = e.target.value;
+                  setAmountColumn(selected || null);
+                  if (selected) recalculateOverviewWithAmountColumn(selected);
+                }}
+                className="surface-subtle mt-3 min-w-0 rounded-lg px-3 py-2 text-sm"
+              >
+                <option value="">No detectada</option>
+                {importedHeaders.map((header) => (
+                  <option key={header} value={header}>
+                    {header}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              type="button"
+              onClick={downloadClassifiedCsv}
+              className="w-fit rounded-lg bg-[var(--foreground)] px-4 py-2 text-sm font-semibold text-[var(--background)] transition hover:opacity-85"
+            >
+              Descargar CSV clasificado
+            </button>
+          </div>
         ) : null}
       </section>
 

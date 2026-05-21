@@ -2,15 +2,13 @@ import type { ClassifiedImportedCsvRow } from "./classify-imported-csv";
 
 export const CLASSIFIED_OVERVIEW_STORAGE_KEY = "mi-app-ia:classified-overview:v1";
 
-const AMOUNT_COLUMN_PRIORITY = [
+const AMOUNT_COLUMN_KEYWORDS = [
   "IMPORTE",
   "CUANTIA",
-  "CUANTÍA",
   "CANTIDAD",
   "AMOUNT",
   "CARGO",
   "DEBITO",
-  "DÉBITO",
   "DEBIT",
   "VALOR",
   "TOTAL",
@@ -30,12 +28,22 @@ export type StoredOverviewRow = {
   match_fuente: string | null;
 };
 
+export type OverviewDiagnostics = {
+  amountColumn: string | null;
+  validAmountRows: number;
+  negativeAmountRows: number;
+  positiveAmountRows: number;
+  zeroAmountRows: number;
+  sampleRawValues: string[];
+};
+
 export type StoredClassifiedOverview = {
   version: 1;
   savedAt: string;
   sourceFileName: string | null;
   movementColumn: string;
   amountColumn: string | null;
+  diagnostics: OverviewDiagnostics;
   rows: StoredOverviewRow[];
 };
 
@@ -55,8 +63,13 @@ export function detectAmountColumn(headers: string[]): string | null {
     if (!byNormalized.has(normalized)) byNormalized.set(normalized, header);
   }
 
-  for (const candidate of AMOUNT_COLUMN_PRIORITY) {
-    const found = byNormalized.get(normalizeHeaderName(candidate));
+  for (const candidate of AMOUNT_COLUMN_KEYWORDS) {
+    const found = byNormalized.get(candidate);
+    if (found) return found;
+  }
+
+  for (const candidate of AMOUNT_COLUMN_KEYWORDS) {
+    const found = headers.find((header) => normalizeHeaderName(header).includes(candidate));
     if (found) return found;
   }
 
@@ -91,8 +104,23 @@ export function buildClassifiedOverview(params: {
   headers: string[];
   sourceFileName: string | null;
   movementColumn: string;
+  amountColumn?: string | null;
 }): StoredClassifiedOverview {
-  const amountColumn = detectAmountColumn(params.headers);
+  const amountColumn = params.amountColumn ?? detectAmountColumn(params.headers);
+  const rows = params.rows.map((row) => ({
+    original: row.original,
+    dataLineNumber: row.dataLineNumber,
+    movementText: row.movementText,
+    amount: amountColumn ? parseAmountValue(row.original[amountColumn]) : null,
+    tipo_movimiento: row.tipo_movimiento,
+    concepto_1: row.concepto_1,
+    concepto_2: row.concepto_2,
+    concepto_3: row.concepto_3,
+    estado_clasificacion: row.estado_clasificacion,
+    match_score: row.match_score,
+    match_fuente: row.match_fuente,
+  }));
+  const validRows = rows.filter((row) => row.amount != null);
 
   return {
     version: 1,
@@ -100,19 +128,20 @@ export function buildClassifiedOverview(params: {
     sourceFileName: params.sourceFileName,
     movementColumn: params.movementColumn,
     amountColumn,
-    rows: params.rows.map((row) => ({
-      original: row.original,
-      dataLineNumber: row.dataLineNumber,
-      movementText: row.movementText,
-      amount: amountColumn ? parseAmountValue(row.original[amountColumn]) : null,
-      tipo_movimiento: row.tipo_movimiento,
-      concepto_1: row.concepto_1,
-      concepto_2: row.concepto_2,
-      concepto_3: row.concepto_3,
-      estado_clasificacion: row.estado_clasificacion,
-      match_score: row.match_score,
-      match_fuente: row.match_fuente,
-    })),
+    diagnostics: {
+      amountColumn,
+      validAmountRows: validRows.length,
+      negativeAmountRows: validRows.filter((row) => Number(row.amount) < 0).length,
+      positiveAmountRows: validRows.filter((row) => Number(row.amount) > 0).length,
+      zeroAmountRows: validRows.filter((row) => Number(row.amount) === 0).length,
+      sampleRawValues: amountColumn
+        ? params.rows
+            .map((row) => row.original[amountColumn])
+            .filter((value): value is string => Boolean(value?.trim()))
+            .slice(0, 5)
+        : [],
+    },
+    rows,
   };
 }
 

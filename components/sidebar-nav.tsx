@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 const items = [
   { href: "/", label: "Inicio" },
   { href: "/importar-csv", label: "Importar CSV" },
-  { href: "/overview-gastos", label: "Overview gastos" },
+  { href: "/overview-gastos", label: "Overview financiero" },
 ] as const;
 
 export function SidebarNav() {
@@ -16,7 +16,7 @@ export function SidebarNav() {
     <aside className="surface-panel flex w-64 shrink-0 flex-col border-r border-[color:color-mix(in_oklab,var(--foreground)_12%,transparent)] px-4 py-6">
       <div className="mb-8 px-2">
         <p className="text-xs font-medium uppercase tracking-widest text-[color:color-mix(in_oklab,var(--foreground)_45%,transparent)]">
-          Gastos IA
+          Finanzas IA
         </p>
         <p className="mt-1 text-sm font-semibold">Finanzas / CSV</p>
       </div>
