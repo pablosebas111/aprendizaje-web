@@ -7,6 +7,10 @@ import { parseImportedCsv } from "@/lib/csv/parse-imported-csv";
 import { classifyImportedRows } from "@/lib/csv/classify-imported-csv";
 import { exportRowsWithClassification } from "@/lib/csv/export-imported-csv";
 import {
+  buildClassifiedOverview,
+  saveClassifiedOverview,
+} from "@/lib/csv/overview-storage";
+import {
   loadKnowledgeBase,
   saveKnowledgeBase,
   upsertKbEntries,
@@ -272,13 +276,27 @@ export function ImportCsvClient() {
       baseKb,
       parsed.totalDataRows,
     );
+    const overview = buildClassifiedOverview({
+      rows: result.rows,
+      headers: parsed.headers,
+      sourceFileName: fileName,
+      movementColumn: selectedMovementColumn,
+    });
+
+    saveClassifiedOverview(overview);
     setClassifiedRows(result.rows);
     setImportedHeaders(parsed.headers);
     setMovementColumn(selectedMovementColumn);
     setPendingImportedCsv(null);
-    setLastStats(result.stats);
+    setLastStats({
+      ...result.stats,
+      columna_importe_overview: overview.amountColumn ?? "No detectada",
+    });
     setStatus(
-      `Clasificacion completada usando "${selectedMovementColumn}": ${result.stats.clasificados} de ${result.stats.filas_validas} fila(s) clasificada(s).`,
+      `Clasificacion completada usando "${selectedMovementColumn}": ${result.stats.clasificados} de ${result.stats.filas_validas} fila(s) clasificada(s). ` +
+        (overview.amountColumn
+          ? `Overview guardado con importe detectado en "${overview.amountColumn}".`
+          : "Overview guardado, pero no se detecto una columna de importe."),
     );
   };
 
