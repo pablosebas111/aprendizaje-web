@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Mi app IA",
-  description: "Aplicación Next.js",
+  title: "Clasificador Inteligente de Gastos",
+  description: "Importa movimientos bancarios, clasificalos y analiza tus gastos.",
 };
 
 export default function RootLayout({
